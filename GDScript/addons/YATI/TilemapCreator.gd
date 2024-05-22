@@ -60,7 +60,6 @@ var _base_path = ""
 var _base_name = ""
 var _encoding = ""
 var _compression = ""
-var _map_layers_to_tilemaps = false
 var _tm_layer_counter: int = 0
 var _first_gids = []
 var _atlas_sources = null
@@ -106,11 +105,6 @@ func get_error_count():
 
 func get_warning_count():
 	return _warning_count
-	
-
-func set_map_layers_to_tilemaps(value: bool):
-	_map_layers_to_tilemaps = value
-
 
 func set_use_default_filter(value: bool):
 	_use_default_filter = value
@@ -262,57 +256,41 @@ func handle_layer(layer: Dictionary, parent: Node2D):
 	if get_property(layer, "no_import", "bool") == "true":
 		return
 
-	if layer_type != "tilelayer" and not _map_layers_to_tilemaps:
+	if layer_type != "tilelayer":
 		_tilemap = null
 		_tm_layer_counter = 0
 
 	if layer_type == "tilelayer":
+		var tilemap_layer = TileMapLayer.new();
+
 		if _map_orientation == "isometric":
 			layer_offset_x += _map_tile_width * (_map_height / 2.0 - 0.5)
 		var layer_name = str(layer["name"])
-		if _map_layers_to_tilemaps:
+
+		if _tilemap == null:
 			_tilemap = TileMap.new()
-			if layer_name != "":
-				_tilemap.name = layer_name
-			_tilemap.visible = layer_visible
-			if layer_offset_x > 0 or layer_offset_y > 0:
-				_tilemap.position = Vector2(layer_offset_x, layer_offset_y)
-			if layer_opacity < 1.0 or tint_color != "#ffffff":
-				_tilemap.modulate = Color(tint_color, layer_opacity)
-			_tilemap.tile_set = _tileset
+			_tilemap.remove_layer(0)
+			_tilemap.name = "TileMap"
 			handle_parallaxes(parent, _tilemap, layer)
 			if _map_orientation == "isometric" or _map_orientation == "staggered":
 				_tilemap.y_sort_enabled = true
-				_tilemap.set_layer_y_sort_enabled(0, true)
-		else:
-			if _tilemap == null:
-				_tilemap = TileMap.new()
-				if layer_name != "":
-					_tilemap.name = layer_name
-				_tilemap.remove_layer(0)
-				handle_parallaxes(parent, _tilemap, layer)
-				_tilemap_offset_x = layer_offset_x
-				_tilemap_offset_y = layer_offset_y
-				_tilemap.position = Vector2(layer_offset_x, layer_offset_y)
-				if _map_orientation == "isometric" or _map_orientation == "staggered":
-					_tilemap.y_sort_enabled = true
-			elif layer_name != "":
-				_tilemap.name += "|" + layer_name
-			if _tilemap.tile_set == null:
-				_tilemap.tile_set = _tileset 
-			_tilemap.add_layer(_tm_layer_counter)
-			_tilemap.set_layer_name(_tm_layer_counter, layer_name)
-			_tilemap.set_layer_enabled(_tm_layer_counter, layer_visible)
-			if _map_orientation == "isometric" or _map_orientation == "staggered":
-				_tilemap.set_layer_y_sort_enabled(_tm_layer_counter, true)
-			if abs(layer_offset_x -_tilemap_offset_x) > 0.01 or abs(layer_offset_y - _tilemap_offset_y) > 0.01:
-				print_rich("[color="+WARNING_COLOR+"]Godot 4 has no tilemap layer offsets -> switch off 'use_tilemap_layers'[/color]")
-				_warning_count += 1
-			if layer_opacity < 1.0 or tint_color != "#ffffff":
-				_tilemap.set_layer_modulate(_tm_layer_counter, Color(tint_color, layer_opacity))
 
+		tilemap_layer.tile_set = _tileset
+		tilemap_layer.name = layer_name;
+		tilemap_layer.enabled = layer_visible;
+
+		tilemap_layer.position.x = layer_offset_x;
+		tilemap_layer.position.y = layer_offset_y;
+
+		_tilemap.add_child(tilemap_layer);
+		tilemap_layer.owner = _base_node;
+
+		if _map_orientation == "isometric" or _map_orientation == "staggered":
+			_tilemap.set_layer_y_sort_enabled(_tm_layer_counter, true)
+		if layer_opacity < 1.0 or tint_color != "#ffffff":
+			tilemap_layer.modulate = Color(tint_color, layer_opacity);
 		if not _use_default_filter:
-			_tilemap.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			tilemap_layer.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST;
 		
 		if _infinite and layer.has("chunks"):
 			# Chunks
@@ -323,19 +301,15 @@ func handle_layer(layer: Dictionary, parent: Node2D):
 				var chunk_height = int(chunk["height"])
 				var chunk_data = handle_data(chunk["data"], chunk_width * chunk_height)
 				if chunk_data != null:
-					create_map_from_data(chunk_data, offset_x, offset_y, chunk_width)
-
+					create_map_from_data(tilemap_layer, chunk_data, offset_x, offset_y, chunk_width)
 		elif layer.has("data"):
 			# Data
 			var data = handle_data(layer["data"], _map_width * _map_height)
 			if data != null:
-				create_map_from_data(data, 0, 0, _map_width)
+				create_map_from_data(tilemap_layer, data, 0, 0, _map_width)
 
 		if layer.has("properties"):
 			handle_properties(_tilemap, layer["properties"])
-
-		if not _map_layers_to_tilemaps:
-			_tm_layer_counter += 1
 
 	elif layer_type == "objectgroup":
 		var layer_node = Node2D.new()
@@ -539,7 +513,7 @@ func create_polygons_on_alternative_tiles(source_data: TileData, target_data: Ti
 		target_data.set_occluder(layer_id, occluder_polygon)
 		
 
-func create_map_from_data(layer_data: Array, offset_x: int, offset_y: int, map_width: int):
+func create_map_from_data(tile_map_layer: TileMapLayer, layer_data: Array, offset_x: int, offset_y: int, map_width: int):
 	var cell_counter: int = -1
 	for cell in layer_data:
 		cell_counter += 1
@@ -613,8 +587,7 @@ func create_map_from_data(layer_data: Array, offset_x: int, offset_y: int, map_w
 							diff_y += 1
 						tile_data.texture_origin = Vector2i(-diff_x/2, diff_y/2) - tile_offset
 					create_polygons_on_alternative_tiles(atlas_source.get_tile_data(atlas_coords, 0), tile_data, alt_id)
-		
-		_tilemap.set_cell(_tm_layer_counter, cell_coords, source_id, atlas_coords, alt_id)
+		tile_map_layer.set_cell(cell_coords, source_id, atlas_coords, alt_id)
 
 
 func get_godot_type(godot_type_string: String):
@@ -1594,10 +1567,7 @@ func handle_properties(target_node: Node, properties: Array, map_properties: boo
 		elif name.to_lower() == "layer_z_index" and type == "int" and target_node is TileMap:
 			target_node.z_index = int(val)
 		elif name.to_lower() == "z_index" and type == "int" and target_node is TileMap:
-			if _map_layers_to_tilemaps:
-				target_node.z_index = int(val)
-			else:
-				target_node.set_layer_z_index(_tm_layer_counter, int(val))
+			target_node.set_layer_z_index(_tm_layer_counter, int(val))
 		elif name.to_lower() == "y_sort_origin" and type == "int" and target_node is TileMap:
 			target_node.set_layer_y_sort_origin(_tm_layer_counter, int(val))
 		
